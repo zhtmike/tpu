@@ -47,6 +47,8 @@ from utils import mask_utils
 from utils.object_detection import visualization_utils
 from hyperparameters import params_dict
 
+random.seed(0)
+
 
 FLAGS = flags.FLAGS
 
@@ -110,6 +112,12 @@ def main(unused_argv):
     data = json.load(f)
     data = data['attributes']
     names = [x['name'] for x in data]
+  label_attribute_dict = {}
+  for i, name in enumerate(names):
+      label_attribute_dict[i] =  {
+        'id': id_index,
+        'name': name,
+      }
 
   params = config_factory.config_generator(FLAGS.model)
   if FLAGS.config_file:
@@ -188,6 +196,9 @@ def main(unused_argv):
         np_classes = np_classes.astype(np.int32)
         np_attributes = predictions_np['detection_attributes'][
             0, :num_detections, :]
+
+        np_attributes_sorted_inds = np.argsort(-np_attributes, axis=1)[:, :3]
+        np_attributes_sorted_val = -np.sort(-np_attributes, axis=1)[:, :3]
         np_masks = None
         if 'detection_masks' in predictions_np:
           instance_masks = predictions_np['detection_masks'][0, :num_detections]
@@ -206,15 +217,17 @@ def main(unused_argv):
             'masks': encoded_masks,
         })
 
-        print(np_attributes.shape)
 
         image_with_detections = (
-            visualization_utils.visualize_boxes_and_labels_on_image_array(
+            visualization_utils.visualize_boxes_and_multi_labels_on_image_array(
                 np_image,
                 np_boxes,
                 np_classes,
                 np_scores,
+                np_attributes_sorted_inds,
+                np_attributes_sorted_val,
                 label_map_dict,
+                label_attribute_dict,
                 instance_masks=np_masks,
                 use_normalized_coordinates=False,
                 max_boxes_to_draw=FLAGS.max_boxes_to_draw,

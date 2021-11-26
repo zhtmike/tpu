@@ -665,6 +665,145 @@ def visualize_boxes_and_labels_on_image_array(
 
   return image
 
+def visualize_boxes_and_multi_labels_on_image_array(
+    image,
+    boxes,
+    boxes_classes,
+    boxes_scores,
+    classes,
+    scores,
+    category_index,
+    attribute_index,
+    instance_masks=None,
+    instance_boundaries=None,
+    keypoints=None,
+    use_normalized_coordinates=False,
+    max_boxes_to_draw=20,
+    min_score_thresh=.5,
+    line_thickness=4):
+  """Overlay labeled boxes on an image with formatted scores and label names.
+
+  This function groups boxes that correspond to the same location
+  and creates a display string for each detection and overlays these
+  on the image. Note that this function modifies the image in place, and returns
+  that same image.
+
+  Args:
+    image: uint8 numpy array with shape (img_height, img_width, 3)
+    boxes: a numpy array of shape [N, 4]
+    classes: a numpy array of shape [N]. Note that class indices are 1-based,
+      and match the keys in the label map.
+    scores: a numpy array of shape [N] or None.  If scores=None, then
+      this function assumes that the boxes to be plotted are groundtruth
+      boxes and plot all boxes as black with no classes or scores.
+    category_index: a dict containing category dictionaries (each holding
+      category index `id` and category name `name`) keyed by category indices.
+    instance_masks: a numpy array of shape [N, image_height, image_width] with
+      values ranging between 0 and 1, can be None.
+    instance_boundaries: a numpy array of shape [N, image_height, image_width]
+      with values ranging between 0 and 1, can be None.
+    keypoints: a numpy array of shape [N, num_keypoints, 2], can
+      be None
+    use_normalized_coordinates: whether boxes is to be interpreted as
+      normalized coordinates or not.
+    max_boxes_to_draw: maximum number of boxes to visualize.  If None, draw
+      all boxes.
+    min_score_thresh: minimum score threshold for a box to be visualized
+    agnostic_mode: boolean (default: False) controlling whether to evaluate in
+      class-agnostic mode or not.  This mode will display scores but ignore
+      classes.
+    line_thickness: integer (default: 4) controlling line width of the boxes.
+    groundtruth_box_visualization_color: box color for visualizing groundtruth
+      boxes
+    skip_scores: whether to skip score when drawing a single detection
+    skip_labels: whether to skip label when drawing a single detection
+
+  Returns:
+    uint8 numpy array with shape (img_height, img_width, 3) with overlaid boxes.
+  """
+  # Create a display string (and color) for every box location, group any boxes
+  # that correspond to the same location.
+  box_to_display_str_map = collections.defaultdict(list)
+  box_to_color_map = collections.defaultdict(str)
+  box_to_instance_masks_map = {}
+  box_to_score_map = {}
+  box_to_instance_boundaries_map = {}
+  box_to_keypoints_map = collections.defaultdict(list)
+  if not max_boxes_to_draw:
+    max_boxes_to_draw = boxes.shape[0]
+  for i in range(min(max_boxes_to_draw, boxes.shape[0])):
+    if scores is None or boxes_scores[i] > min_score_thresh:
+      box = tuple(boxes[i].tolist())
+      if instance_masks is not None:
+        box_to_instance_masks_map[box] = instance_masks[i]
+      if instance_boundaries is not None:
+        box_to_instance_boundaries_map[box] = instance_boundaries[i]
+      if keypoints is not None:
+        box_to_keypoints_map[box].extend(keypoints[i])
+      display_strs = []
+      class_name = str(category_index[boxes_classes[i]]['name'])
+      display_str = '{}({}%)'.format(class_name, int(100*boxes_scores[i]))
+      display_strs.append(display_str)
+
+      for class_id, class_score in zip(classes[i], scores[i]):
+        if class_score < min_score_thresh:
+          break
+        class_name = str(attribute_index[class_id]['name'])
+        display_str = '{}({}%)'.format(class_name, int(100*class_score))
+        display_strs.append(display_str)
+      if len(display_strs) > 1:
+        display_strs = display_strs[0] + ':' + '|'.join(display_strs[1:])
+      else:
+        display_strs = display_strs[0]
+          
+      box_to_score_map[box] = int(100*boxes_scores[i])
+      box_to_display_str_map[box].append(display_strs)
+      box_to_color_map[box] = STANDARD_COLORS[
+          boxes_classes[i] % len(STANDARD_COLORS)]
+
+  # Handle the case when box_to_score_map is empty.
+  if box_to_score_map:
+    box_color_iter = sorted(
+        box_to_color_map.items(), key=lambda kv: box_to_score_map[kv[0]])
+  else:
+    box_color_iter = box_to_color_map.items()
+
+  # Draw all boxes onto image.
+  for box, color in box_color_iter:
+    ymin, xmin, ymax, xmax = box
+    if instance_masks is not None:
+      draw_mask_on_image_array(
+          image,
+          box_to_instance_masks_map[box],
+          color=color
+      )
+    if instance_boundaries is not None:
+      draw_mask_on_image_array(
+          image,
+          box_to_instance_boundaries_map[box],
+          color='red',
+          alpha=1.0
+      )
+    draw_bounding_box_on_image_array(
+        image,
+        ymin,
+        xmin,
+        ymax,
+        xmax,
+        color=color,
+        thickness=line_thickness,
+        display_str_list=box_to_display_str_map[box],
+        use_normalized_coordinates=use_normalized_coordinates)
+    if keypoints is not None:
+      draw_keypoints_on_image_array(
+          image,
+          box_to_keypoints_map[box],
+          color=color,
+          radius=line_thickness / 2,
+          use_normalized_coordinates=use_normalized_coordinates)
+
+  return image
+
 
 def add_cdf_image_summary(values, name):
   """Adds a tf.summary.image for a CDF plot of the values.
